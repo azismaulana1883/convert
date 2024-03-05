@@ -1,0 +1,296 @@
+Sub PackList_Kath(vKPNo As String, vBuyerNo As String)
+    If vKPNo = "" Then MsgBox "KP# empty", vbInformation: Exit Sub
+    If vBuyerNo = "" Then MsgBox "PO Buyer empty ", vbInformation: Exit Sub
+    
+    vShipMode = "10"
+    sql = "select * from tmpexppacklist where kpno='" & vKPNo & "'" _
+        & "and buyerno='" & vBuyerNo & "'" _
+        & "and shipmode='" & vShipMode & "'"
+    Rs1.Open sql, DB_Web, 2, 3
+    If Not Rs1.EOF Then
+        If MsgBox("Data already exist, do you want to create new ??", vbQuestion + vbYesNo) = vbYes Then
+            sql = "select * from htemp_pack_list_no"
+            Set Rs1 = New ADODB.Recordset
+            Rs1.Open sql, DB, 2, 3
+                vNoPackList = Rs1!nopacklist
+            Rs1!nopacklist = Rs1!nopacklist + 1
+            Rs1.Update
+            Rs1.Close
+            
+            Rev = 0
+            
+            vMaxPcsKarton = InputBox("Enter Max Pcs Per Karton")
+            vMaxPcsKartonORI = vMaxPcsKarton
+            
+            If Not IsNumeric(vMaxPcsKarton) Then
+                MsgBox "Max pcs per carton tidak valid", vbCritical
+                Exit Sub
+            End If
+            
+            vCustNo = "-"
+            
+            vDesc = "Update Exp Pack List"
+            vTrans = "Exp Pack List"
+            VKp = UCase(vKPNo)
+            vUser = FName & "-" & vIP_Add
+            vRem = "KP " & vKPNo & " PO " & vBuyerNo
+            sql = "insert into logfile (kpno,username,edittime,editform,description,remark) " _
+                & "values ('" & VKp & "'," _
+                & "'" & vUser & "'," _
+                & "'" & Format(Now(), "yyyy-mm-dd hh:mm:ss") & "'," _
+                & "'" & vTrans & "','" & vDesc & "','" & vRem & "')"
+            DB.Execute sql
+            
+            sql = "delete from tmpexppacklist where kpno='" & vKPNo & "'" _
+                & "and buyerno='" & vBuyerNo & "'" _
+                & "and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+            DB_Web.Execute sql
+        Else
+            Rs1.Close
+            Exit Sub
+        End If
+    Else
+        sql = "select * from htemp_pack_list_no"
+        Rs4.Open sql, DB, 2, 3
+        If Rs4.EOF Then
+            vNoPackList = 1
+            Rs4.AddNew
+            Rs4!nopacklist = 1
+            Rs4.Update
+        Else
+            vNoPackList = Rs4!nopacklist
+            Rs4!nopacklist = Rs4!nopacklist + 1
+            Rs4.Update
+        End If
+        Rs4.Close
+        
+        Rev = 1
+        Rs1.Close
+        
+        vMaxPcsKarton = InputBox("Enter Max Pcs Per Karton")
+        vMaxPcsKartonORI = vMaxPcsKarton
+        If Not IsNumeric(vMaxPcsKarton) Then
+            MsgBox "Wrong qty max pcs per carton", vbInformation
+            Exit Sub
+        End If
+        
+        vCustNo = "-"
+    End If
+    
+    'MULAI HITUNG
+    Dim RsColor As New ADODB.Recordset
+    Set RsColor = New ADODB.Recordset
+    sql = "select distinct color from sap_cfm where kpno='" & vKPNo & "' and buyerno='" & vBuyerNo & "' " _
+        & "order by color"
+    RsColor.Open sql, DB_Web, 2, 3
+    Do While Not RsColor.EOF
+        vColorNya = RsColor!Color
+        sql = "select a.*,sum(a.qty_order) qty from sap_cfm a inner join mastersize s on a.size=s.size " _
+            & "where a.kpno='" & vKPNo & "' and a.buyerno='" & vBuyerNo & "' " _
+            & "and a.color='" & vColorNya & "' group by a.size order by s.urut"
+        Rs1.Open sql, DB_Web, 2, 3
+        vCartNo = 0
+        vCartNo2 = 0
+        vSize = ""
+        Number_Size = 1
+        lvExpPackList.ListItems.Clear
+        Do While Not Rs1.EOF
+            vQty = Rs1!Qty
+            If Val(vQty) >= Val(vMaxPcsKarton) Then
+                vCartNo = vCartNo2 + 1
+                jml_karton = 0
+                Do While Not Val(vQty) < Val(vMaxPcsKarton)
+                    vQty = Val(vQty) - Val(vMaxPcsKarton)
+                    vCartNo2 = vCartNo2 + 1
+                    jml_karton = jml_karton + 1
+                Loop
+                
+                If Val(vCartNo2) = Val(vCartNo) Then
+                    vCartNo3 = vCartNo2
+                Else
+                    vCartNo3 = vCartNo & "-" & vCartNo2
+                End If
+                
+                vQty1 = "qty" & Number_Size
+                vDestNya = Rs1!dest
+                sql = "insert into tmpexppacklist (kpno," & vQty1 & ",jml_karton,cart_no,ip,buyerno,articleno,nopacklist,shipmode,dest) values('" & Rs1!kpno & "'," _
+                    & " " & vMaxPcsKarton & "," & jml_karton & ",'" & vCartNo3 & "','" & IPx & "'," _
+                    & "'" & vBuyerNo & "','" & vColorNya & "'," & vNoPackList & ",'" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "','" & Rs1!dest & "')"
+                DB_Web.Execute sql
+                
+                If Val(vQty) < Val(vMaxPcsKarton) Then
+                    A = 1
+                    Do While Not A > LvSize.ListItems.count
+                        If LvSize.ListItems.Item(A).Text = Rs1!Size Then
+                            vSize = LvSize.ListItems.Item(A).Text
+                        End If
+                        A = A + 1
+                    Loop
+                    
+                    'If vQty > 0 Then
+                        Set Itm1 = lvExpPackList.ListItems.Add(, , vSize)
+                        Itm1.SubItems(1) = vQty
+                    'End If
+                End If
+            Else
+                A = 1
+                Do While Not A > LvSize.ListItems.count
+                    If LvSize.ListItems.Item(A).Text = Rs1!Size Then
+                        vSize = LvSize.ListItems.Item(A).Text
+                    End If
+                    A = A + 1
+                Loop
+                
+                Set Itm1 = lvExpPackList.ListItems.Add(, , vSize)
+                Itm1.SubItems(1) = Rs1!Qty
+            End If
+            Rs1.MoveNext
+            Number_Size = Number_Size + 1
+        Loop
+        Rs1.Close
+        
+        'SISAAN
+        A = 1
+        Do While Not A > lvExpPackList.ListItems.count
+            Number_Size = A
+            vMaxPcsKartonSisa = lvExpPackList.ListItems.Item(A).SubItems(1)
+            If Val(lvExpPackList.ListItems.Item(A).SubItems(1)) > 0 Then
+                vCartNo2 = vCartNo2 + 1
+            End If
+            vCartNo = 1
+            If Val(lvExpPackList.ListItems.Item(A).SubItems(1)) > 0 Then
+                vQty1 = "qty" & Number_Size
+                sql = "insert into tmpexppacklist (kpno," & vQty1 & ",jml_karton,cart_no,ip,buyerno,articleno,nopacklist,shipmode,dest) values('" & vKPNo & "'," _
+                    & " " & vMaxPcsKartonSisa & "," & vCartNo & ",'" & vCartNo2 & "','" & IPx & "'," _
+                    & "'" & vBuyerNo & "','" & vColorNya & "'," & vNoPackList & ",'" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "','" & vDestNya & "')"
+                DB_Web.Execute sql
+            End If
+            A = A + 1
+        Loop
+        
+        A = 1
+        Do While Not A > LvSize.ListItems.count
+            vSz = "size" & A
+            sql = "update tmpexppacklist set " & vSz & "='" & LvSize.ListItems.Item(A).Text & "' where ip='" & IPx & "'" _
+                & "and kpno='" & vKPNo & "'" _
+                & "and buyerno='" & vBuyerNo & "' and articleno='" & vColorNya & "' and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+            DB_Web.Execute sql
+            A = A + 1
+        Loop
+        
+        sql = "select a.*,s.buyer from orderstatus a inner join masterbuyer s on a.buyercode=s.buyercode where a.kpno='" & vKPNo & "'"
+        Rs1.Open sql, DB, 2, 3
+        If Not Rs1.EOF Then
+            sql = "update tmpexppacklist set styleno='" & Rs1!styleno & "'," _
+                & "buyer='" & Rs1!Buyer & "',itemname='" & Replace(Rs1!itemname, "'", "`") & "'," _
+                & "custno='" & UCase(vCustNo) & "' where kpno='" & vKPNo & "'" _
+                & "and buyerno='" & vBuyerNo & "' and articleno='" & vColorNya & "' and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+            DB_Web.Execute sql
+        End If
+        Rs1.Close
+        
+        sql = "select a.* from buyernodetail a inner join mastersize s on a.size=s.size " _
+            & "where a.kpno='" & vKPNo & "' and a.buyerno='" & vBuyerNo & "' " _
+            & "and (a.articleno='" & vColorNya & "' or a.color='" & vColorNya & "') order by s.id "
+        Rs1.Open sql, DB, 2, 3
+        vqtyorder = 0
+        Do While Not Rs1.EOF
+            vqtyorder = vqtyorder + Rs1!Qty
+            Rs1.MoveNext
+        Loop
+        If vqtyorder > 0 Then
+            Rs1.MoveFirst
+            sql = "update tmpexppacklist set qtyorder=" & vqtyorder & ", " _
+                & "deldate='" & Format(Rs1!deldate, "yyyy-mm-dd") & "'," _
+                & "articleno='" & IIf(Rs1!articleno = "", vColorNya, Rs1!articleno) & "' where kpno='" & vKPNo & "'" _
+                & "and buyerno='" & vBuyerNo & "' and articleno='" & vColorNya & "' and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+            DB_Web.Execute sql
+        End If
+        Rs1.Close
+        
+        sql = "select * from orderstatusdetail where kpno='" & vKPNo & "'" _
+            & "and buyerno='" & vBuyerNo & "'"
+        Rs1.Open sql, DB, 2, 3
+        If Not Rs1.EOF Then
+            sql = "update tmpexppacklist set unitorder='" & Rs1!unit & "', " _
+                & "dest='" & Rs1!dest & "',buyerno='" & vBuyerNo & "' " _
+                & "where kpno='" & vKPNo & "'" _
+                & "and buyerno='" & vBuyerNo & "' and articleno='" & vColorNya & "' and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+            DB_Web.Execute sql
+        End If
+        Rs1.Close
+        
+        vUser = FName & "-" & IPx
+        sql = "update tmpexppacklist set rev=" & Rev & ",username='" & vUser & "',maxpcs=" & vMaxPcsKartonORI & "  where kpno='" & vKPNo & "'" _
+            & "and buyerno='" & vBuyerNo & "'" _
+            & "and articleno='" & vColorNya & "' and shipmode='" & IIf(vShipMode = "", vShipModeWIP, vShipMode) & "'"
+        DB_Web.Execute sql
+        
+        A = 1
+        Do While Not A > LvKarton.ListItems.count
+            If LvKarton.ListItems.Item(A).Selected = True Then
+                sql = "update tmpexppacklist set jenis_karton='" & LvKarton.ListItems.Item(A).Text & "' " _
+                    & "where kpno='" & vKPNo & "'" _
+                    & "and buyerno='" & vBuyerNo & "'" _
+                    & "and ifnull(jenis_karton,'')='' and shipmode='" & vShipMode & "' "
+                DB_Web.Execute sql
+            End If
+            A = A + 1
+        Loop
+        RsColor.MoveNext
+    Loop
+    RsColor.Close
+    Call Copy_To_PKLI(vKPNo, vBuyerNo)
+    
+    MsgBox "Done", vbInformation
+End Sub
+
+Sub Copy_To_PKLI(vKPNo As String, vBuyerNo As String)
+    sql = "delete from tbl_pkli where kpno='" & vKPNo & "' and buyerno='" & vBuyerNo & "'"
+    DB_Web.Execute sql
+    sql = "select * from tmpexppacklist where kpno='" & vKPNo & "' and buyerno='" & vBuyerNo & "' order by id"
+    Rs1.Open sql, DB_Web, 2, 3
+    vBuyerCode = NB(Flookup_CN("buyercode", "sap_cfm", "kpno='" & vKPNo & "'", DB_Web))
+    vJmlSize = LvSize.ListItems.count
+    Do While Not Rs1.EOF
+        vid_jenis_karton = NB(Flookup_CN("id_karton", "tbl_karton", "jenis_karton='" & Rs1!jenis_karton & "'", DB_Web))
+        For aa = 1 To vJmlSize
+            vNmFldSz = "size" & aa
+            vNmFldQty = "qty" & aa
+            sql = "select buyercode,item from sap_cfm where kpno='" & Rs1!kpno & "' and buyerno='" & Rs1!buyerno & "'" _
+                & "and color='" & Rs1!articleno & "' and size='" & Rs1.Fields(vNmFldSz) & "' "
+            Rs2.Open sql, DB_Web, 2, 3
+                vBuyerCode = Rs2!buyercode
+                vItem = Rs2!Item
+            Rs2.Close
+            If Rs1!cart_no Like "*-*" Then
+                vRange = "Y"
+                vSplitCtn = Split(Rs1!cart_no, "-")
+                loop_for = vSplitCtn(0)
+                loop_next = vSplitCtn(1)
+            Else
+                vRange = "N"
+                loop_for = Rs1!cart_no
+                loop_next = Rs1!cart_no
+            End If
+            For ss = loop_for To loop_next
+                If vRange = "N" Then
+                    vCtnRange = Null
+                Else
+                    vCtnRange = Rs1!cart_no
+                End If
+                If Val(Rs1.Fields(vNmFldQty).Value) > 0 Then
+                    sql = "insert into tbl_pkli (no_karton,no_karton_range,buyercode,kpno,buyerno,dest,id_jenis_karton," _
+                        & "item,color,size,qty_pack) values ('" & ss & "','" & vCtnRange & "','" & vBuyerCode & "'," _
+                        & "'" & Rs1!kpno & "','" & Rs1!buyerno & "','" & Rs1!dest & "','" & vid_jenis_karton & "'," _
+                        & "'" & vItem & "','" & Rs1!articleno & "','" & Rs1.Fields(vNmFldSz) & "','" & Rs1.Fields(vNmFldQty) & "')"
+                    DB_Web.Execute sql
+                End If
+            Next
+        Next
+        Rs1.MoveNext
+    Loop
+    Rs1.Close
+    sql = "update tbl_pkli set no_karton_range=null where no_karton_range='' and kpno='" & vKPNo & "' and buyerno='" & vBuyerNo & "'"
+    DB_Web.Execute sql
+End Sub
